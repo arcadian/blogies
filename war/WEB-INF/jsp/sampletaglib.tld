@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<taglib xmlns="http://java.sun.com/xml/ns/j2ee"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://java.sun.com/xml/ns/j2ee http://java.sun.com/xml/ns/j2ee/web-jsptaglibrary_2_0.xsd"
+    version="2.0">
+  
+	<tlib-version>1.1</tlib-version> 
+	<short-name>frmt</short-name>
+	<uri>/WEB-INF/jsp/sampletaglib.tld</uri>  
+	<tag>  
+	    <description>Used for testing</description>  
+	    <name>hello</name>  
+	    <tag-class>com.web.tag.HelloTag</tag-class>  
+	    <body-content>empty</body-content>  
+	</tag>  
+	<tag>  
+	    <description>Nesting</description>  
+	    <name>nest</name>  
+	    <tag-class>com.web.tag.SubstrTag</tag-class>
+	    <body-content>JSP</body-content>
+	    <attribute>
+	    	<name>input</name>
+	      	<required>true</required>
+	    </attribute>
+	    <attribute>
+	    	<name>times</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	</tag>
+	<tag>  
+	    <description>Tree Comments Nesting</description>  
+	    <name>comments</name>  
+	    <tag-class>com.web.tag.TreeCommentTag</tag-class>
+	    <body-content>JSP</body-content>
+	    <attribute>
+	    	<name>comments</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	</tag>
+	<tag>  
+	    <description>Blog Post Navigator</description>  
+	    <name>navigator</name>  
+	    <tag-class>com.web.tag.PostNavigatorTag</tag-class>
+	    <body-content>JSP</body-content>
+	    <attribute>
+	    	<name>posts</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	</tag>
+	<tag>  
+	    <description>Link Paginate Navigator</description>  
+	    <name>linkpaginate</name>  
+	    <tag-class>com.web.tag.LinkPaginateTag</tag-class>
+	    <body-content>JSP</body-content>
+	    <attribute>
+	    	<name>container</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	    <attribute>
+	    	<name>pageNum</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	</tag>
+	<tag>  
+	    <description>Post Paginate</description>  
+	    <name>postpaginate</name>  
+	    <tag-class>com.web.tag.PostPaginateTag</tag-class>
+	    <body-content>JSP</body-content>
+	    <attribute>
+	    	<name>container</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	    <attribute>
+	    	<name>pageNum</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	</tag>
+	<tag>  
+	    <description>Simple Tree Comments Printer</description>  
+	    <name>printnestedcomments</name>  
+	    <tag-class>com.web.tag.SimpleTreeCommentTag</tag-class>
+	    <body-content>JSP</body-content>
+	    <attribute>
+	    	<name>blogEntry</name>
+	      	<required>true</required>
+	      	<rtexprvalue>true</rtexprvalue>
+	    </attribute>
+	</tag>     
+</taglib>  

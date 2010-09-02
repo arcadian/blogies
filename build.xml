@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+
+<project name="blogies" basedir="." default="deploywar">
+    <property file="build.properties"/>
+
+    <property name="src.dir" value="src"/>
+    <property name="web.dir" value="war"/>
+    <property name="appserver.lib" value="ext_lib"/>
+    <property name="dist.dir" value="dist"/>
+
+
+    <property name="build.dir" value="${web.dir}/WEB-INF/classes"/>
+    <property name="name" value="blogies"/>
+
+    <path id="master-classpath">
+        <fileset dir="${web.dir}/WEB-INF/lib">
+            <include name="*.jar"/>
+        </fileset>
+        <fileset dir="${appserver.lib}">
+            <include name="servlet*.jar"/>
+        	 <include name="jsp*.jar"/>
+        </fileset>
+        <pathelement path="${build.dir}"/>
+    </path>
+
+    
+    <target name="build" description="Compile main source tree java files">
+      <delete dir="${dist.dir}"/>
+	<delete dir="${build.dir}"/>  
+	<mkdir dir="${build.dir}"/>
+        <javac destdir="${build.dir}" source="1.5" target="1.5" debug="true"
+               deprecation="false" optimize="false" failonerror="true">
+            <src path="${src.dir}"/>
+            <classpath refid="master-classpath"/>
+        </javac>
+    	<copy todir="${build.dir}" preservelastmodified="true">
+            <fileset dir="${src.dir}">
+                <include name="*.properties"/>
+            </fileset>
+		 </copy>
+    </target>
+
+
+    <target name="deploywar" depends="build" description="Deploy application as a WAR file">
+        <war destfile="${name}.war"
+             webxml="${web.dir}/WEB-INF/web.xml">
+            <fileset dir="${web.dir}">
+                <include name="**/*.*"/>
+            </fileset>
+        	
+        </war>
+        <copy todir="${dist.dir}" preservelastmodified="true">
+            <fileset dir=".">
+                <include name="*.war"/>
+            </fileset>
+        </copy>
+	  <delete file="${name}.war"/>
+    </target>
+    
+</project>

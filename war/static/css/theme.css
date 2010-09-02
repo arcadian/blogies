@@ -1,0 +1,36 @@
+body {
+	background-color: 669999;
+}
+
+.collapsed {
+	display: none;	
+}
+
+.commentinfo {
+	border-left:1px dotted #DDDDFF;
+	margin-left:15px;
+}
+
+div#navigator {
+	float:left;
+	height:90%;
+	width:20%;
+	text-align:center;
+	margin-top:60px;
+}
+
+div#content {
+	float:left;
+	height:90%;
+	width:80%;
+	text-align:left;
+	border-left:2px #black;
+}
+
+div .posttitle,#test, .blogentryarea {
+	margin-left:15px;
+}
+
+.errorMsg {
+		background-color: red;
+}
