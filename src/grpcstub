@@ -1,3 +1,37 @@
+syntax = "proto3";
+
+package prices;
+
+// Request to fetch prices for multiple symbols in a date interval
+message PriceIntervalRequest {
+  repeated string symbol_ids = 1;    // list of symbols to fetch
+  string start_date = 2;             // ISO date string, e.g., "2025-09-01"
+  string end_date = 3;               // ISO date string, e.g., "2025-09-30"
+}
+
+// Response for a batch of symbols in a given month
+message SymbolPrices {
+  string symbol_id = 1;              // canonical symbol
+  repeated double prices = 2;        // daily prices array (length = days in month)
+}
+
+// Price batch for a specific month
+message PriceBatchResponse {
+  string year_month = 1;             // e.g., "2025-09"
+  repeated SymbolPrices symbols = 2; // all symbols in this batch
+}
+
+// gRPC service definition
+service PriceService {
+  // Server-streaming RPC: client requests symbols/date range, server streams batches
+  rpc GetPrices(PriceIntervalRequest) returns (stream PriceBatchResponse);
+}
+
+///////////////
+/////////////
+///////////////
+
+
 import com.example.prices.*;
 import io.grpc.stub.StreamObserver;
 
