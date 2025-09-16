@@ -165,52 +165,47 @@ public class PriceServerMain {
 
 import java.time.YearMonth;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ThreadLocalRandom;
 
-public class BulkLoadExecutor {
+public class BulkLoader {
 
-    private final ExecutorService datastoreExecutor;
-    private final BulkLoader bulkLoader; // your existing datastore loader
-    private final int maxRetries;
+    public Map<String, double[]> loadMonthPrices(List<String> symbols, YearMonth ym) {
+        Map<String, double[]> result = new HashMap<>();
+        int attempts = 0;
+        int maxAttempts = 5;
+        int daysInMonth = ym.lengthOfMonth();
 
-    public BulkLoadExecutor(BulkLoader bulkLoader, int maxRetries) {
-        this.bulkLoader = bulkLoader;
-        this.maxRetries = maxRetries;
-        this.datastoreExecutor = Executors.newFixedThreadPool(2); // 2 concurrent datastore calls
-    }
+        while (attempts < maxAttempts) {
+            attempts++;
+            try {
+                // simulate 429 rate limit
+                if (ThreadLocalRandom.current().nextInt(10) < 2) {
+                    throw new RateLimitException("429 Too Many Requests");
+                }
 
-    /**
-     * Submits a batch of missing symbols to the datastore.
-     * Returns a CompletableFuture with the loaded data.
-     */
-    public CompletableFuture<Map<String, double[]>> loadMissingSymbols(List<String> symbols, YearMonth ym) {
-        return CompletableFuture.supplyAsync(() -> {
-            int attempt = 0;
-            while (attempt < maxRetries) {
-                attempt++;
-                try {
-                    return bulkLoader.loadMonthPrices(symbols, ym);
-                } catch (BulkLoader.RateLimitException e) {
-                    try {
-                        long backoffMs = (long) Math.pow(2, attempt) * 100L; // exponential backoff
-                        Thread.sleep(backoffMs);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException("Interrupted during backoff", ie);
+                for (String sym : symbols) {
+                    double[] arr = new double[daysInMonth];
+                    for (int i = 0; i < daysInMonth; i++) {
+                        arr[i] = ThreadLocalRandom.current().nextDouble(100, 200);
                     }
+                    result.put(sym, arr);
+                }
+
+                return result;
+
+            } catch (RateLimitException e) {
+                try {
+                    Thread.sleep((long) Math.pow(2, attempts) * 100L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during backoff", ie);
                 }
             }
-            throw new RuntimeException("Failed to load symbols from datastore after " + maxRetries + " attempts");
-        }, datastoreExecutor);
+        }
+        throw new RuntimeException("Failed after retries");
     }
 
-    /**
-     * Shutdown the executor gracefully.
-     */
-    public void shutdown() {
-        datastoreExecutor.shutdown();
+    private static class RateLimitException extends RuntimeException {
+        RateLimitException(String msg) { super(msg); }
     }
 }
-
-
