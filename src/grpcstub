@@ -209,3 +209,124 @@ public class BulkLoader {
         RateLimitException(String msg) { super(msg); }
     }
 }
+
+
+/////////////
+////////////
+/////////////
+
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+
+import java.time.Duration;
+import java.time.YearMonth;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Month-level cache for symbol prices.
+ * Key: YearMonth
+ * Value: Map of canonical symbol -> daily prices array (double[])
+ */
+public class PriceCache {
+
+    private final Cache<YearMonth, Map<String, double[]>> cache;
+    private final SymbolPool symbolPool;
+
+    public PriceCache(SymbolPool symbolPool) {
+        this.symbolPool = symbolPool;
+        this.cache = Caffeine.newBuilder()
+                .maximumSize(50_000)           // adjust for max YearMonth keys
+                .expireAfterWrite(Duration.ofHours(6))
+                .build();
+    }
+
+    /**
+     * Retrieve cached prices for a symbol in a given month.
+     * Returns null if not in cache.
+     */
+    public double[] get(String symbol, YearMonth ym) {
+        String canonical = symbolPool.getCanonical(symbol);
+        Map<String, double[]> monthMap = cache.getIfPresent(ym);
+        return (monthMap != null) ? monthMap.get(canonical) : null;
+    }
+
+    /**
+     * Put prices for a symbol/month into the cache.
+     * Thread-safe via ConcurrentHashMap.
+     */
+    public void put(String symbol, YearMonth ym, double[] prices) {
+        String canonical = symbolPool.getCanonical(symbol);
+        Map<String, double[]> monthMap = cache.get(ym, k -> new ConcurrentHashMap<>());
+        monthMap.put(canonical, prices);
+    }
+
+    /**
+     * Check if cache contains prices for a symbol/month.
+     */
+    public boolean contains(String symbol, YearMonth ym) {
+        String canonical = symbolPool.getCanonical(symbol);
+        Map<String, double[]> monthMap = cache.getIfPresent(ym);
+        return monthMap != null && monthMap.containsKey(canonical);
+    }
+
+    /**
+     * Optional: Clear the cache (for testing or maintenance)
+     */
+    public void clear() {
+        cache.invalidateAll();
+    }
+}
+
+
+///////////
+////////
+////////////
+
+
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Canonical symbol pool to deduplicate symbol strings and limit memory.
+ * Max size is fixed; old/unused symbols are evicted automatically.
+ */
+public class SymbolCache {
+
+    private final Cache<String, String> pool;
+
+    /**
+     * @param maxSize Maximum number of unique symbols to store
+     */
+    public SymbolCache(int maxSize) {
+        this.pool = Caffeine.newBuilder()
+                .maximumSize(maxSize)
+                .expireAfterAccess(24, TimeUnit.HOURS) // optional eviction policy
+                .build();
+    }
+
+    /**
+     * Returns a canonical string for the symbol.
+     * If symbol already exists in cache, returns existing reference.
+     * Otherwise, inserts and returns it.
+     */
+    public String getCanonical(String symbol) {
+        return pool.get(symbol, s -> s);
+    }
+
+    /**
+     * Optional: remove a symbol from pool
+     */
+    public void remove(String symbol) {
+        pool.invalidate(symbol);
+    }
+
+    /**
+     * Optional: clear all cached symbols
+     */
+    public void clear() {
+        pool.invalidateAll();
+    }
+}
