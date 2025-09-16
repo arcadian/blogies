@@ -1,0 +1,216 @@
+import com.example.prices.*;
+import io.grpc.stub.StreamObserver;
+
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.*;
+import java.util.concurrent.*;
+
+public class PriceServiceImpl extends PriceServiceGrpc.PriceServiceImplBase {
+
+    private final ExecutorService requestExecutor;      // injected for top-level request concurrency
+    private final ExecutorService datastoreExecutor;    // 2-thread executor for datastore
+    private final PriceCache priceCache;
+    private final SymbolPool symbolPool;
+    private final BulkLoader bulkLoader;
+
+    public PriceServiceImpl(
+            ExecutorService requestExecutor,
+            PriceCache priceCache,
+            SymbolPool symbolPool,
+            BulkLoader bulkLoader) {
+
+        this.requestExecutor = requestExecutor;
+        this.priceCache = priceCache;
+        this.symbolPool = symbolPool;
+        this.bulkLoader = bulkLoader;
+        this.datastoreExecutor = Executors.newFixedThreadPool(2); // datastore rate limit
+    }
+
+    @Override
+    public void getPrices(PriceIntervalRequest request, StreamObserver<PriceBatchResponse> responseObserver) {
+        // Submit the request to the top-level executor
+        requestExecutor.submit(() -> processRequest(request, responseObserver));
+    }
+
+    private void processRequest(PriceIntervalRequest request, StreamObserver<PriceBatchResponse> responseObserver) {
+        try {
+            LocalDate start = LocalDate.parse(request.getStartDate());
+            LocalDate end = LocalDate.parse(request.getEndDate());
+            List<String> symbols = request.getSymbolIdsList();
+            int batchSize = 1000;
+
+            List<YearMonth> months = splitMonths(start, end);
+
+            for (YearMonth ym : months) {
+                LocalDate monthStart = ym.atDay(1);
+                LocalDate monthEnd = ym.atEndOfMonth();
+                LocalDate from = monthStart.isBefore(start) ? start : monthStart;
+                LocalDate to = monthEnd.isAfter(end) ? end : monthEnd;
+
+                for (int i = 0; i < symbols.size(); i += batchSize) {
+                    List<String> batch = symbols.subList(i, Math.min(i + batchSize, symbols.size()));
+                    processBatchMonth(batch, ym, from, to, responseObserver);
+                }
+            }
+
+            responseObserver.onCompleted();
+        } catch (Exception e) {
+            responseObserver.onError(e);
+        }
+    }
+
+    private void processBatchMonth(
+            List<String> symbols,
+            YearMonth ym,
+            LocalDate from,
+            LocalDate to,
+            StreamObserver<PriceBatchResponse> responseObserver) {
+
+        Map<String, double[]> hits = new HashMap<>();
+        List<String> misses = new ArrayList<>();
+
+        // Check cache
+        for (String sym : symbols) {
+            String canonical = symbolPool.getCanonical(sym);
+            double[] monthPrices = priceCache.get(canonical, ym);
+            if (monthPrices != null) hits.put(canonical, monthPrices);
+            else misses.add(canonical);
+        }
+
+        PriceBatchResponse.Builder respBuilder = PriceBatchResponse.newBuilder().setYearMonth(ym.toString());
+
+        // Add cache hits
+        for (Map.Entry<String, double[]> e : hits.entrySet()) {
+            SymbolPrices.Builder spb = SymbolPrices.newBuilder().setSymbolId(e.getKey());
+            double[] arr = e.getValue();
+            int fromIdx = from.getDayOfMonth() - 1;
+            int toIdx = to.getDayOfMonth() - 1;
+            for (int d = fromIdx; d <= toIdx; d++) spb.addPrices(arr[d]);
+            respBuilder.addSymbols(spb);
+        }
+
+        if (misses.isEmpty()) {
+            responseObserver.onNext(respBuilder.build());
+            return;
+        }
+
+        // Async datastore load (rate-limited, 2 threads)
+        CompletableFuture
+                .supplyAsync(() -> bulkLoader.loadMonthPrices(misses, ym), datastoreExecutor)
+                .thenAccept(resultMap -> {
+                    for (Map.Entry<String, double[]> e : resultMap.entrySet()) {
+                        priceCache.put(e.getKey(), ym, e.getValue());
+                        SymbolPrices.Builder spb = SymbolPrices.newBuilder().setSymbolId(e.getKey());
+                        double[] arr = e.getValue();
+                        int fromIdx = from.getDayOfMonth() - 1;
+                        int toIdx = to.getDayOfMonth() - 1;
+                        for (int d = fromIdx; d <= toIdx; d++) spb.addPrices(arr[d]);
+                        respBuilder.addSymbols(spb);
+                    }
+                    responseObserver.onNext(respBuilder.build());
+                })
+                .exceptionally(ex -> {
+                    responseObserver.onError(ex);
+                    return null;
+                });
+    }
+
+    // Utility to split interval into months
+    private static List<YearMonth> splitMonths(LocalDate start, LocalDate end) {
+        List<YearMonth> months = new ArrayList<>();
+        if (start.isAfter(end)) return months;
+
+        YearMonth cursor = YearMonth.from(start);
+        YearMonth endYm = YearMonth.from(end);
+        while (!cursor.isAfter(endYm)) {
+            months.add(cursor);
+            cursor = cursor.plusMonths(1);
+        }
+        return months;
+    }
+}
+
+
+///////////
+/////////
+//////////
+
+import java.util.concurrent.*;
+
+public class PriceServerMain {
+    public static void main(String[] args) {
+        ExecutorService requestExecutor = new ThreadPoolExecutor(
+                10, 10,
+                0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(50),
+                new ThreadPoolExecutor.AbortPolicy()
+        );
+
+        SymbolPool symbolPool = new SymbolPool(100_000);
+        PriceCache priceCache = new PriceCache(symbolPool);
+        BulkLoader bulkLoader = new BulkLoader();
+
+        PriceServiceImpl service = new PriceServiceImpl(requestExecutor, priceCache, symbolPool, bulkLoader);
+
+        // gRPC server initialization
+        // ServerBuilder.forPort(9090).addService(service).build().start();
+    }
+}
+
+
+/////////////
+///////////
+////////////
+
+import java.time.YearMonth;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class BulkLoadExecutor {
+
+    private final ExecutorService datastoreExecutor;
+    private final BulkLoader bulkLoader; // your existing datastore loader
+    private final int maxRetries;
+
+    public BulkLoadExecutor(BulkLoader bulkLoader, int maxRetries) {
+        this.bulkLoader = bulkLoader;
+        this.maxRetries = maxRetries;
+        this.datastoreExecutor = Executors.newFixedThreadPool(2); // 2 concurrent datastore calls
+    }
+
+    /**
+     * Submits a batch of missing symbols to the datastore.
+     * Returns a CompletableFuture with the loaded data.
+     */
+    public CompletableFuture<Map<String, double[]>> loadMissingSymbols(List<String> symbols, YearMonth ym) {
+        return CompletableFuture.supplyAsync(() -> {
+            int attempt = 0;
+            while (attempt < maxRetries) {
+                attempt++;
+                try {
+                    return bulkLoader.loadMonthPrices(symbols, ym);
+                } catch (BulkLoader.RateLimitException e) {
+                    try {
+                        long backoffMs = (long) Math.pow(2, attempt) * 100L; // exponential backoff
+                        Thread.sleep(backoffMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Interrupted during backoff", ie);
+                    }
+                }
+            }
+            throw new RuntimeException("Failed to load symbols from datastore after " + maxRetries + " attempts");
+        }, datastoreExecutor);
+    }
+
+    /**
+     * Shutdown the executor gracefully.
+     */
+    public void shutdown() {
+        datastoreExecutor.shutdown();
+    }
+}
+
+
