@@ -1,3 +1,68 @@
+                     ┌─────────────────────┐
+                     │   gRPC Client(s)    │
+                     │  (requests symbols) │
+                     └─────────┬───────────┘
+                               │
+                               │  PriceIntervalRequest (symbols + date range)
+                               ▼
+                ┌─────────────────────────────┐
+                │  Request Executor (10 threads) │  ← top-level concurrency
+                └─────────┬───────────────┘
+                          │
+       ┌──────────────────┴───────────────────┐
+       │                                      │
+┌─────────────┐                        ┌─────────────┐
+│ Batch Split │                        │ Month Split │
+│  (1000 symbols)                     │ (per YearMonth) │
+└─────┬───────┘                        └─────┬───────┘
+      │                                     │
+      ▼                                     ▼
+┌──────────────────────────────┐
+│          PriceCache           │  ← YearMonth → Symbol → double[]
+│ - Checks cache for symbols    │
+│ - Returns cached prices        │
+└───────────┬──────────────────┘
+            │ cache hit
+            ▼
+┌──────────────────────────────┐
+│  BulkLoadExecutor (2 threads)│  ← datastore rate-limited
+│ - Receives missing symbols    │
+│ - Calls BulkLoader            │
+│ - Retries on 429 (backoff)   │
+└───────────┬──────────────────┘
+            ▼
+       ┌───────────────┐
+       │ BulkLoader    │  ← persistent datastore
+       │ - Fetches monthly prices
+       │ - Returns Map<symbol, double[]> 
+       └───────────────┘
+            │
+            ▼
+    ┌───────────────┐
+    │ PriceCache    │  ← populate cache with returned prices
+    └───────────────┘
+            │
+            ▼
+    ┌─────────────────────────────┐
+    │ PriceBatchResponse Builder  │
+    │ - Combines cache hits       │
+    │   and datastore misses      │
+    │ - Single response per batch │
+    └───────────┬─────────────────┘
+                ▼
+       ┌───────────────────┐
+       │ gRPC Streaming    │
+       │ - Client receives │
+       │   combined batch  │
+       └───────────────────┘
+
+
+
+
+///////////////
+/////////////
+/////////////
+
 syntax = "proto3";
 
 package prices;
